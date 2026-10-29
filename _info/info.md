@@ -117,3 +117,146 @@
       Пока мы ещё не защищали API — мы только получили удостоверение пользователя.
 
 ### что такое JWT, из чего он состоит и почему микросервис может ему доверять
+
+Разбираем JWT
+1. Что такое JWT?
+   JWT (JSON Web Token) — компактный формат токена, который позволяет передавать набор утверждений (claims) о пользователе или клиенте.
+
+   JWT обычно выглядит так:
+
+         eyJhbGciOiJSUzI1NiIs.eyJzdWIiOiIxMjMifQ.signature
+
+   Он состоит из трёх частей, разделённых точками:
+
+   - Header - Алгоритм и тип
+   - Payload - Данные и claims
+   - Signature - Цифровая подпись
+
+   Header сообщает, каким алгоритмом подписан токен. 
+   Payload содержит claims. 
+   Signature позволяет проверить, что подписанные части токена не были изменены.
+
+   Важный момент: Payload обычно не зашифрован, а закодирован в Base64URL. Его может прочитать любой, у кого есть токен.
+
+2. Посмотрим содержимое нашего токена
+
+      Расшифруем например на https://www.jwt.io/
+
+            {
+            "exp": 1793271774,
+            "iat": 1793271474,
+            "jti": "onrtro:aab2b3b3-890e-c882-84ff-8fa4a03e5042",
+            "iss": "http://localhost:8080/realms/company-realm",
+            "aud": "account",
+            "sub": "18fd7833-593f-487a-974f-d3023f736065",
+            "typ": "Bearer",
+            "azp": "admins-api",
+            "sid": "5Md2QQ8P-EF2QyKb9KbvKaC3",
+            "acr": "1",
+            "realm_access": {
+            "roles": [
+            "offline_access",
+            "uma_authorization",
+            "default-roles-company-realm"
+            ]
+            },
+            "resource_access": {
+            "account": {
+            "roles": [
+            "manage-account",
+            "manage-account-links",
+            "view-profile"
+            ]
+            }
+            },
+            "scope": "email profile",
+            "email_verified": false,
+            "name": "Alice Smith",
+            "preferred_username": "alice",
+            "given_name": "Alice",
+            "family_name": "Smith",
+            "email": "alice@example.com"
+            }
+3. Разбираем основные claims
+
+   - sub	- Уникальный идентификатор пользователя
+   - preferred_username	- Логин, например alice
+   - iss	- Кто выдал токен — наш Keycloak realm
+   - exp	- Когда токен истекает
+   - iat	- Когда токен был выпущен
+   - azp	- Клиент, которому выдали токен
+   - aud	- Для каких получателей предназначен токен
+   - realm_access.roles	- Роли пользователя на уровне realm
+
+   Особенно обрати внимание на sub. Это стабильный идентификатор пользователя в рамках его учётной записи. 
+   Он лучше подходит для идентификации, чем username, который может измениться.
+
+4. Почему Spring Boot доверяет этому JWT?
+   Keycloak подписывает токен приватным ключом. 
+   Spring Security получает соответствующий публичный ключ Keycloak и проверяет подпись.
+
+   ![001_keycloak-to-spring-flow.png](scr/001_keycloak-to-spring-flow.png)
+
+   Таким образом, Spring Boot обычно не нужно спрашивать Keycloak о действительности каждого JWT. Он может проверить его самостоятельно.
+
+   При этом корректная подпись ещё не означает, что пользователь имеет право выполнить конкретную операцию.
+
+### Настраиваем роли
+
+Задача: создадим роли ADMIN и USER, назначим их alice и bob, получим новые токены и увидим, 
+как Keycloak отражает права пользователя в JWT
+
+1. Что мы узнали из твоего JWT
+
+         {
+         "preferred_username": "alice",
+         "iss": "http://localhost:8080/realms/company-realm",
+         "azp": "admins-api"
+         }
+
+   А теперь самое интересное — роли:
+
+         "roles": [
+         "offline_access",
+         "uma_authorization",
+         "default-roles-company-realm"
+         ]
+
+   У Alice пока нет нашей бизнес-роли ADMIN. Есть только стандартные роли Keycloak. Мы сейчас это исправим.
+
+2. Создаём две роли
+   В Admin Console, в realm company-realm:
+      1. Открой Realm roles в меню слева.
+      2. Нажми Create role.
+      3. Создай роль ADMIN.
+      4. Аналогично создай роль USER.
+         Это будут наши бизнес-роли:
+         - ADMIN - Управлять пользователями и выполнять административные операции
+         - USER	- Просматривать обычные данные
+
+   Пока это только названия ролей. Сами по себе они ничего не запрещают и не разрешают — правила доступа мы позже настроим в Spring Security.
+
+3. Назначаем роли пользователям
+   Alice — администратор
+   - Открой Users → alice.
+   - Найди вкладку Role mapping.
+   - Нажми Assign role.
+   - Выбери ADMIN и подтверди назначение.
+     
+   Bob — обычный пользователь
+     - Аналогично открой Users → bob и назначь ему только роль USER.
+
+4. Получаем новый токен Alice. Декодируем, Видим роль ADMIN
+
+          "realm_access": {
+          "roles": [
+          "offline_access",
+          "uma_authorization",
+          "ADMIN",
+          "default-roles-company-realm"
+          ]
+          }
+5. Что важно понять
+   Мы пока не реализовали авторизацию в самом приложении. 
+   Keycloak сообщает, какие роли назначены пользователю, а Spring Security будет решать, какие endpoint доступны этим ролям. Это принципиально важное разделение ответственности.
+   Следующим шагом подключим Spring Boot и проверим всё настоящими HTTP-запросами.
