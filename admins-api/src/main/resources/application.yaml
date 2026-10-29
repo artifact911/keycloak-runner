@@ -1,0 +1,11 @@
+server:
+  port: 8081
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Spring Security использует этот адрес, чтобы получить конфигурацию OpenID Connect и публичные ключи Keycloak,
+          # а затем проверять подпись и срок действия JWT, а также соответствие iss ожидаемому issuer.
+          issuer-uri: http://localhost:8080/realms/company-realm
